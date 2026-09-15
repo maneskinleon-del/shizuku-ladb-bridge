@@ -4,16 +4,34 @@ Supervise and recover the [Shizuku](https://github.com/RikkaApps/Shizuku) server
 (`shizuku_server`) on a **root-less Android device**, using the on-device ADB
 transport provided by **LADB** — no PC, no root, no unlocked bootloader.
 
-This repository publishes a **completed, frozen proof of concept (PoC)**. The
-experiments were executed, audited and sealed in a private working repository
-(`~/ladb-shizuku-recovery`, standalone Git repo); this public repository is a
-faithful export of that frozen state so third parties can study or reproduce
-the technique.
+This repository publishes a **completed, frozen proof of concept (PoC)**,
+executed and audited on the author's own device. The complete experimental
+record — scripts, reports, raw evidence and checkpoint — is included here
+verbatim, so the project is self-contained and auditable end to end.
 
-- **Canonical experimental source:** `~/ladb-shizuku-recovery` @ commit `af14a393efc3506f9cafd6cc4d0a83abed7e74e1`
+- **Experimental record:** frozen at commit `af14a393efc3506f9cafd6cc4d0a83abed7e74e1`, included verbatim in this repository
 - **Status:** frozen — no further experiments are planned or required
 - **What this repo is:** the scripts that ran, the evidence they produced, and the reports explaining both
 - **What this repo is not:** a product, a library, a modification of Shizuku, or a universal Android solution
+
+The project's name reflects the full chain it puts together — the watchdog is
+only the piece that keeps the Shizuku end of that bridge alive:
+
+```text
+LADB → ADB transport → Termux → Shizuku native starter → shizuku_server → rish
+```
+
+## Who is this for?
+
+This PoC may be useful if:
+
+- you run Shizuku without root;
+- you use LADB / Wireless Debugging as the ADB transport;
+- you have Termux available on the same device;
+- Shizuku's server sometimes dies while the ADB transport remains available;
+- you want an auditable recovery mechanism rather than manually restarting Shizuku.
+
+This is not intended as a universal Shizuku reliability solution.
 
 ---
 
@@ -77,34 +95,22 @@ while the server keeps running.
 
 ### 1.4 Boot-time execution: Termux:Boot
 
-**Termux:Boot** is a Termux companion add-on (available via F-Droid) that
-provides a boot-execution mechanism for Termux: scripts placed in
-`~/.termux/boot/` are executed when the device finishes booting. In this PoC a
-boot script (`~/.termux/boot/shizuku-watchdog-boot.sh`) was used as part of the
-**boot supervision** mechanism: at device boot it starts `runsvdir`, which
-raises the watchdog service — so supervision exists before any human opens
-Termux. The PoC registered direct evidence of that execution:
+**Termux:Boot** is a Termux companion add-on (available via F-Droid) that runs
+scripts placed in `~/.termux/boot/` when the device finishes booting. This PoC
+used such a boot script (`shizuku-watchdog-boot.sh`) to raise the supervision
+stack at device boot — `runsvdir` → `runsv` → watchdog — so supervision
+exists before anyone opens Termux. The execution left direct evidence:
 `evidence/reboot_boot_evidence.log` was written by the boot script at
 2026-09-14 22:36:20, **before any interactive session existed**.
 
-What the evidence matrix records — and what must be preserved when quoting
-this PoC:
-
-- `REBOOT_BOOT_SUPERVISION = VERIFIED` — **boot-glue scope**: the boot script
-  ran, unattended, and raised the supervision (runsvdir + runsv + watchdog
-  observed running post-boot).
-- **Termux:Boot app-driven supervision (`com.termux.boot`) = NOT_TESTED** —
-  the specific variant where the Termux:Boot *app* drives the execution was
-  never validated in this PoC.
-
-If the historical narrative ("Termux:Boot was used for boot supervision") and
-the final evidence matrix appear to differ, **the final matrix is the
-experimental authority**: what was mechanically demonstrated is the boot-glue
-script executed by the Termux:Boot-plugin infrastructure, and the app-driven
-variant remains untested. No other explanation is offered or inferred.
-
-This PoC does **not** claim that Termux:Boot guarantees automatic recovery of
-Shizuku after any reboot.
+One clarification so nothing is over-read: during the experiments the
+Termux:Boot app itself was never installed — what mechanically ran was the
+boot script, executed by the Termux:Boot-plugin infrastructure. That is what
+the evidence matrix records as `REBOOT_BOOT_SUPERVISION = VERIFIED`
+(**boot-glue scope**), while **Termux:Boot app-driven supervision
+(`com.termux.boot`) = NOT_TESTED**. The evidence matrix in §3 is the
+authority. This PoC does **not** claim that Termux:Boot guarantees automatic
+recovery of Shizuku after any reboot.
 
 ### 1.5 What was built: the recovery watchdog
 
@@ -210,10 +216,10 @@ and a **device reboot** (commit `af14a39`) — see the evidence matrix below.
 | `.gitignore` | Keeps the runtime `watchdog.log` out of the tree |
 
 > **Note for reproducers:** `service/shizuku-watchdog/run` and
-> `install-service.sh` reference the original environment
-> (`/data/data/com.termux/files/home/ladb-shizuku-recovery`). They are kept
-> byte-identical to what ran. If you reuse them, adjust the `HOME_DIR` and
-> `PREFIX` paths to your environment.
+> `install-service.sh` hardcode the original device layout (a
+> `…/home/ladb-shizuku-recovery` path). They are kept byte-identical to what
+> ran. If you reuse them, adjust the `HOME_DIR` and `PREFIX` paths to your
+> environment.
 
 ## 3. What was demonstrated
 
@@ -380,9 +386,9 @@ beyond the five scripts above.
 
 ## 7. Evidence provenance
 
-Everything in `reports/` and `evidence/` is **preserved verbatim from the
-original frozen repository** (export of `~/ladb-shizuku-recovery` @
-`af14a393efc3506f9cafd6cc4d0a83abed7e74e1`):
+Everything in `reports/` and `evidence/` is the **frozen experimental
+record**, preserved verbatim as sealed at commit
+`af14a393efc3506f9cafd6cc4d0a83abed7e74e1`:
 
 - `CHECKPOINT.md` — the frozen checkpoint: status tokens, mechanical evidence
   per increment, SHA-256 integrity manifests, directory inventory.
@@ -419,11 +425,10 @@ record.
 
 ## 8. Related work
 
-This experiment was later documented — knowledge-transfer only, no dependency —
-in the `shizuku-rikka` skill of the author's agent context:
-`~/buffy-context/.agents/skills/shizuku-rikka/SKILL.md`, which in turn
-references this PoC frozen at `af14a39`. The two repositories are independent;
-this project can be understood and used without any of that context.
+The findings of this experiment were later consolidated, knowledge-transfer
+only, into the author's `shizuku-rikka` skill, which references this PoC
+frozen at `af14a39`. No dependency exists in either direction; this project
+is fully self-contained.
 
 ## License / usage
 
