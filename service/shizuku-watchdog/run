@@ -1,0 +1,12 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# service/shizuku-watchdog/run — runit service definition (watchdog v1).
+# Installed by install-service.sh into $PREFIX/var/service/shizuku-watchdog/.
+# runsv supervises this script: if watchdog.sh ever exits, runsv restarts it
+# (supervision itself is the daemon). wake-lock is re-acquired on every start.
+HOME_DIR=/data/data/com.termux/files/home/ladb-shizuku-recovery
+cd "$HOME_DIR" || exit 1
+# Keep the Termux app process alive in background so supervision survives
+# session teardown (idempotent; held by the app, not by this script).
+termux-wake-lock >/dev/null 2>&1 || true
+# watchdog v0 loop, interval 10 s, appending to the (gitignored) runtime log.
+exec ./watchdog.sh 10 >> "$HOME_DIR/watchdog.log" 2>&1

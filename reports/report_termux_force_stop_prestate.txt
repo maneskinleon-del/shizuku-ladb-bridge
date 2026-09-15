@@ -1,0 +1,77 @@
+TERMUX_FORCE_STOP EXPERIMENT — PRE-STATE + RESUME RUNBOOK
+Written 2026-09-13 06:25 (approx) BEFORE the force-stop, from inside Termux.
+This file must survive the force-stop (it lives on disk, not in any process).
+Repo: ~/ladb-shizuku-recovery, clean at commit b9ca628.
+
+=== PRE-STATE (mechanically captured) ===
+Script SHA-256 (all identical to base freeze):
+  doctor.sh  555b1b92e01d286517b014ce20638e42432e2b4956fe0ed99acb8cda7799c2d8
+  recover.sh b71b1296eb4ea64532e8868bd5168f648f22f1a1f3218590015e3c59c6e1a353
+  verify.sh  28e7796cf48c366e777a9d0297b341d67423f89ea011b2c3373d2300823358d8
+  watchdog.sh 6f6ed1bd8f343ed4b2a5a144947153948fa716d6f923f993cef098aeda7983a0
+Daemon: runsv 10952 -> watchdog session 32457, alive 5713 s (spanning sessions).
+Transport: localhost:43459. Server: PID 8679, user shell, UP.
+Daemon log: UP cycles 552-554, serial localhost:43459 pid 8679.
+
+Termux-UID (u0_a364) processes at pre-state — ALL expected to die at force-stop:
+  runsvdir aggregators: 1413, 8851, 31425, 32113 (PPID 1)
+  runsv: 6648 ssh-agent, 6649 sshd, 6650 cupsd, 10952 shizuku-watchdog (PPID 1)
+  adb server: 11029 (holds the LADB transport brokered for Termux clients)
+  shells: zsh 12493, 12510, 12593, 12594; gitstatusd 12596
+  freebuff agent: 19176 (+ children 19267, 19268, 30025) <- writer of this file
+  watchdog session: 32457 (parent 10952), child sleep 29868
+
+Outside the kill radius (different UIDs / different app):
+  shizuku_server PID 8679 (UID shell, started by adbd starter)
+  LADB app (own UID; its embedded adb client connects to device wireless debug)
+
+=== HYPOTHESIS UNDER TEST ===
+Android force-stop of com.termux kills every Termux-UID process (supervision,
+watchdog, adb server) but NOT shizuku_server (UID shell). After Termux is
+reopened, the server must still be UP (same PID 8679 if untouched) and
+supervision must be restorable. Distinguishes "session teardown" (VERIFIED)
+from "app-level kill" (this test) — without touching reboot.
+
+=== TRIGGER (performed by user, OUTSIDE Termux) ===
+From the LADB terminal (or Android Settings > Apps > Termux > Force stop):
+  am force-stop com.termux
+Everything in the pre-state inventory above is expected to die instantly,
+including the session that wrote this file. That is the experiment, not a
+failure.
+
+=== RESUME RUNBOOK (execute in order after reopening Termux) ===
+1. Inventory what died / survived / auto-revived — BEFORE restoring anything:
+     cd ~/ladb-shizuku-recovery
+     ps -ef | awk 'NR==1 || $1=="u0_a364"'
+     ps -ef | grep -E "[w]atchdog.sh|[r]unsv|[a]db .*fork-server"
+   Record: which of the pre-state PIDs survive (expected: none), whether
+   profile.d auto-restarted runsvdir/runsv (termux-services hook may do this).
+2. Server state (outside Termux, should be untouched):
+     adb devices                       # expect a device (serial may change
+                                       # if mdns re-discovery picks a port;
+                                       # record it either way)
+     SERIAL=$(adb devices | awk '/device$/{print $1}')
+     adb -s "$SERIAL" shell "ps -A -o PID,USER,NAME 2>/dev/null" | awk '$3=="shizuku_server"'
+   Expected: single row, PID 8679, user shell. If the server is DOWN, record
+   it as evidence and run ./recover.sh (that outcome = force-stop revealed a
+   dependency worth documenting, NOT a pass).
+3. Supervision state:
+     /data/data/com.termux/files/usr/bin/sv status /data/data/com.termux/files/usr/var/service/shizuku-watchdog
+   If it reports a live pid: note that termux-services auto-revived it. If
+   "unsupervise"/down: restore with ./install-service.sh start, then re-check.
+4. Functional proof:
+     ./verify.sh; echo exit=$?
+   Expected: UP + FUNCTIONAL, exit 0 (server was never killed).
+5. Watchdog continuity proof (if supervision was restored/auto-revived):
+     tail -5 watchdog.log
+   New UP cycles must show serial + pid 8679. Log continuity across the
+   force-stop gap is the mechanical evidence that supervision crossed the
+   app-level kill boundary (restored or auto-revived).
+6. Write report_termux_force_stop.md/.txt (OBSERVATION -> HYPOTHESIS -> ACTION
+   -> EVIDENCE -> CONCLUSION) using the deltas between this file and the
+   post-state. Commit everything in one increment. Refresh /sdcard/Download
+   copies. Token flip:
+     TERMUX_FORCE_STOP = VERIFIED   (if all of the above holds)
+     TERMUX_FORCE_STOP = FAILED (partial details)   (if supervision or server
+                                                      assumptions break)
+   NO other experiments. Skill update stays deferred until the series closes.

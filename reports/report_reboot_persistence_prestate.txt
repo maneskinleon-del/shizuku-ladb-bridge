@@ -1,0 +1,179 @@
+REBOOT_PERSISTENCE EXPERIMENT — PRE-STATE + RESUME RUNBOOK (PROTOCOL ONLY)
+Written 2026-09-13 (approx 08:00) from inside Termux, BEFORE the reboot.
+This file must survive the reboot (it lives on internal storage, not in any
+process). Repo: ~/ladb-shizuku-recovery, clean at commit cd2163c.
+STATUS: DESIGN — NOTHING IN THIS DOSSIER HAS BEEN EXECUTED. No reboot has
+been performed, Termux:Boot is NOT installed, no boot script exists yet.
+
+=== PRE-STATE (mechanically captured at dossier time) ===
+
+Script SHA-256 (base freeze intact):
+  doctor.sh    555b1b92e01d286517b014ce20638e42432e2b4956fe0ed99acb8cda7799c2d8
+  recover.sh   b71b1296eb4ea64532e8868bd5168f648f22f1a1f3218590015e3c59c6e1a353
+  verify.sh    28e7796cf48c366e777a9d0297b341d67423f89ea011b2c3373d2300823358d8
+  watchdog.sh  6f6ed1bd8f343ed4b2a5a144947153948fa716d6f923f993cef098aeda7983a0
+
+Supervision at dossier time:
+  sv status: run: .../shizuku-watchdog: (pid 11863) 5515s — session spans the
+  force-stop era (auto-revived back then, alive since).
+  Service run script: service/shizuku-watchdog/run (757 B, added at a1ff0c4)
+  executes `watchdog.sh 10` (10 s interval).
+
+Server: shizuku_server PID 8679 (user shell) — SAME PID across v0, v1, the
+failure storm and the force-stop. It will NOT survive the reboot (Shizuku
+semantics: the app_process daemon dies at reboot — see the Shizuku-vs-Root
+table in the skill/Knowledge fichas). That is precisely what makes this the
+first experiment where the watchdog must perform a REAL autonomous relaunch:
+at force-stop the server stayed UP, so the recovery branch was never
+exercised across a boundary.
+
+Transport: ABSENT at dossier time — watchdog.log cycles ~540 show
+"no adb transport — skipping (transport down is NOT server DOWN)". This
+incidentally re-proves the conservative DOWN criterion live (no false
+recovery while blind). Serial history this series: localhost:43459 (storm
+era) -> 42125 (post-force-stop) -> 38121 (latest observed) — the port
+rotates on every adb-server death; the reboot will rotate it again.
+
+Boot-related environment (captured, not assumed):
+  profile.d: start-services.sh present (termux-services hook; runs on shell
+  init — i.e. runsvdir comes back when a Termux shell/login starts).
+  ~/.termux/boot: DOES NOT EXIST.
+  com.termux.boot (Termux:Boot): NOT INSTALLED (dumpsys empty).
+  Battery whitelist (deviceidle): com.termux, com.termux.api whitelisted
+  (uid 10364). com.termux.boot obviously absent (not installed).
+  Device: Xiaomi Mi 10 (umi), Android 13 (API 33) / HyperOS. pgrep available.
+  Termux-UID processes: ALL expected to die at reboot (proven at force-stop
+  scope; reboot is strictly stronger — adbd itself restarts).
+
+=== HYPOTHESES (pre-registered, falsifiable) ===
+
+H1 (server): shizuku_server does NOT survive the reboot. Expected: absent
+  (or new PID) once the transport returns. A same-PID result would be
+  impossible across reboot and would indicate a measurement error.
+H2 (boot supervision, token REBOOT_BOOT_SUPERVISION): with Termux:Boot
+  installed + the boot script below, runsvdir/runsv/watchdog are already
+  running at first post-boot inventory WITHOUT opening Termux interactively.
+H3 (autonomous recovery, token REBOOT_AUTONOMOUS_RECOVERY): once the
+  transport returns (Wireless Debugging persists; port rotates), the
+  watchdog — running since boot — detects the server DOWN and recover.sh
+  relaunches it AUTONOMOUSLY: new PID != OLD_PID, stable N0-N3 (watchdog.log),
+  rish functional, verify.sh exit 0, zero manual recovery commands.
+H4 (umbrella, token REBOOT_PERSISTENCE = VERIFIED (reboot scope)): H2 AND H3
+  AND full-chain functionality. Otherwise FAILED with partials — the two
+  sub-tokens record exactly which stage failed.
+
+=== PREREQUISITES (execution time; approvals required) ===
+
+1. INSTALL Termux:Boot (com.termux.boot) — USER APPROVAL REQUIRED (base
+   series restriction "no apps installed" is explicitly overridden ONLY for
+   this experiment; §11 roadmap names Termux:Boot).
+2. Whitelist it from battery optimization:
+   rish -c "dumpsys deviceidle whitelist +com.termux.boot" — APPROVAL REQUIRED.
+3. Create the boot script (content below) + chmod 700. Created ONLY at
+   execution time, never now.
+4. Pre-reboot evidence: cp watchdog.log to
+   /sdcard/Download/ladb_shizuku_watchdog_pre_reboot.log (frozen pre-state;
+   the live file is gitignored); cp this dossier to Downloads; commit this
+   dossier in a single increment BEFORE rebooting.
+
+PLANNED boot script (~/.termux/boot/shizuku-watchdog-boot.sh):
+
+  #!/data/data/com.termux/files/usr/bin/sh
+  # REBOOT_PERSISTENCE boot glue — writes its own evidence BEFORE any
+  # interactive session, so H2 does not depend on the operator opening Termux.
+  LOG=$HOME/ladb-shizuku-recovery/reboot_boot_evidence.log
+  {
+    echo "=== boot $(date '+%F %T') ==="
+    if pgrep -x runsvdir >/dev/null 2>&1; then
+      echo "runsvdir already up (not started by boot script)"
+    else
+      nohup /data/data/com.termux/files/usr/bin/runsvdir \
+        /data/data/com.termux/files/usr/var/service >/dev/null 2>&1 &
+      echo "runsvdir started by boot script"
+    fi
+    sleep 3
+    /data/data/com.termux/files/usr/bin/sv status \
+      /data/data/com.termux/files/usr/var/service/shizuku-watchdog
+  } >> "$LOG" 2>&1
+
+  reboot_boot_evidence.log stays untracked until the post-experiment commit
+  (same pattern as the force-stop prestate dossier).
+
+=== TRIGGER (performed by user, OUTSIDE Termux) ===
+
+Reboot the device (normal Android reboot). Everything Termux-UID dies —
+that is the experiment, not a failure. NO other trigger, no force-stop, no
+server kills.
+
+=== RESUME RUNBOOK (execute in order after boot; the order IS the evidence) ===
+
+0. Boot evidence FIRST: cat ~/ladb-shizuku-recovery/reboot_boot_evidence.log
+   (written by the boot script before any interactive session if H2 holds).
+1. Inventory what died / survived / auto-started — BEFORE restoring anything:
+     cd ~/ladb-shizuku-recovery
+     ps -ef | awk 'NR==1 || $1=="u0_a364"'
+     ps -ef | grep -E "[w]atchdog.sh|[r]unsv|[a]db .*fork-server"
+   Record: none of the pre-reboot PIDs expected to survive (expected: none).
+2. Transport (first adb invocation respawns the Termux-side adb server):
+     adb devices
+     SERIAL=$(adb devices | awk '/\tdevice$/{print $1}')
+   Record the NEW serial (port WILL differ — rotation re-demonstrated).
+3. Server ground truth:
+     adb -s "$SERIAL" shell "ps -A -o PID,USER,NAME" | awk '$3=="shizuku_server"'
+   Expected (H1): NO row. Record as the DOWN fact.
+4. Supervision: sv status .../var/service/shizuku-watchdog — record whether
+   runsvdir came from the boot script (reboot_boot_evidence.log) or from
+   profile.d after the first interactive open. Do NOT manually start
+   anything before recording this.
+5. AUTONOMOUS WINDOW — the core measurement:
+     tail -f watchdog.log
+   Expected sequence: skip lines while transport absent -> DOWN line once
+   transport returns -> recover.sh delegation -> new PID, N0-N3 stable.
+   Wait >= 3 intervals + up to 5 min for mdns/transport. ZERO manual
+   recovery commands in this window — any manual command here destroys H3.
+6. Functional proof: ./verify.sh; echo exit=$?  (expected UP + FUNCTIONAL,
+   NEW PID — different from 8679).
+7. Boundary data: last pre-reboot cycle line -> new "watchdog v0 started"
+   line; cycle counter reset expected (same mechanics as force-stop).
+8. ONLY AFTER the autonomous outcome is recorded: manual repair is allowed
+   if something failed; every manual action must be prefixed in the log as
+   MANUAL_INTERVENTION and reported as such (H3 = FAILED in that case).
+9. Write report_reboot_persistence.md/.txt (OBSERVATION -> HYPOTHESIS ->
+   ACTION -> EVIDENCE -> CONCLUSION) using deltas vs this dossier. Update
+   CHECKPOINT.md: §9 plate (REBOOT_PERSISTENCE + sub-tokens), §11 roadmap
+   (executed), §12b addendum, §12 manifest (hashes of new files), §13
+   inventory. Commit everything in ONE increment. Refresh /sdcard/Download
+   copies.
+10. Token flip:
+      REBOOT_BOOT_SUPERVISION      = VERIFIED / FAILED       (H2)
+      REBOOT_AUTONOMOUS_RECOVERY   = VERIFIED / FAILED       (H3)
+      REBOOT_PERSISTENCE           = VERIFIED (reboot scope) / FAILED (H4)
+    NO other experiments. This is the LAST planned experiment of the series:
+    after it, update the shizuku-rikka skill + Knowledge/Android/Shizuku.md
+    with the final board and close the series.
+
+=== KNOWN UNKNOWNS (this experiment MEASURES them; none are assumed) ===
+
+- Does the Wireless Debugging toggle persist across reboot on HyperOS?
+  (expected yes; port rotates). If the transport never returns
+  autonomously, record as a transport/pairing limitation — NOT a watchdog
+  failure; the conservative skip must NOT trigger false recovery.
+- Does the Termux-side adb server auto-discover the new tls port (mdns), or
+  is an explicit `adb connect` needed? If connect is needed, that is a
+  documented dependency discovered by the experiment.
+- Does HyperOS let Termux:Boot's process run its script at boot? (battery
+  whitelist prerequisite; if killed, H2 fails on OS grounds — record).
+- Does runsvdir come back ONLY via profile.d on first interactive open?
+  If so: REBOOT_BOOT_SUPERVISION (auto) = FAILED, with the interactive-open
+  path recorded as a partial.
+
+=== RESTRICTIONS ===
+
+- No server kills, no force-stop, no LADB restarts beyond what the reboot
+  itself does. No script modifications (recovery delegates to recover.sh
+  unchanged). No root. Buffy NOT modified.
+- Manual recovery only after the autonomous window is recorded, always
+  labeled MANUAL_INTERVENTION.
+- Installing com.termux.boot + whitelisting it requires explicit user
+  approval BEFORE execution.
+- Skill/Knowledge updates stay deferred until the series closes.

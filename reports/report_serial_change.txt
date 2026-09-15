@@ -1,0 +1,105 @@
+=====================================================================
+EXPERIMENT — LADB SERIAL CHANGE (dynamic transport detection)
+Date: 2026-09-13
+Repo: ~/ladb-shizuku-recovery (canonical, standalone)
+Checkpoint of departure: 3efedb79831382c7b2ff6b0a643ae5d284c84c07 (clean)
+Device: Xiaomi Mi 10 (umi) · Android 13 (API 33) / HyperOS
+=====================================================================
+
+OBSERVATION
+-----------
+- Repo clean at 3efedb7 before starting (git status empty).
+- SERIAL_OLD = localhost:38639  (state "device", transport_id 13)
+- shizuku_server UP at PID 7793 (from the base checkpoint recovery).
+- Script SHA-256 baseline:
+  doctor.sh  555b1b92e01d286517b014ce20638e42432e2b4956fe0ed99acb8cda7799c2d8
+  recover.sh b71b1296eb4ea64532e8868bd5168f648f22f1a1f3218590015e3c59c6e1a353
+  verify.sh  28e7796cf48c366e777a9d0297b341d67423f89ea011b2c3373d2300823358d8
+
+HYPOTHESIS
+----------
+Scripts detect the LADB serial dynamically (priority: *adb-tls-connect* ->
+host:port -> any "device"), so they keep working unchanged when LADB
+restarts and its serial changes — even across format change
+(mDNS/TLS instead of host:port).
+
+ACTION
+------
+1. Captured SERIAL_OLD via adb devices (nothing hardcoded).
+2. Restarted the LADB app normally (no re-pairing, no settings change).
+3. Polled adb devices until transport returned; captured SERIAL_NEW.
+4. Compared serials mechanically.
+5. Ran unmodified scripts: doctor.sh -> recover.sh -> verify.sh.
+6. Re-verified script hashes after the run.
+7. No watchdog, no reboot, no re-pairing, no forced kill, no extra experiments.
+
+EVIDENCE
+--------
+SERIAL_OLD = localhost:38639                             (transport_id 13)
+SERIAL_NEW = adb-d2c6cbda-uWIKtV._adb-tls-connect._tcp.  (transport_id 1)
+
+adb devices after restart:
+adb-d2c6cbda-uWIKtV._adb-tls-connect._tcp. device product:umi_global model:Mi_10 device:umi transport_id:1
+
+SERIAL_OLD != SERIAL_NEW -> OBSERVED (string AND format change:
+host:port -> mDNS/TLS service name)
+
+== doctor.sh (new serial) ==
+[1/5] adb client ............ OK
+[2/5] LADB transport ........ OK (serial=adb-d2c6cbda-uWIKtV._adb-tls-connect._tcp.)
+[3/5] shell identity ........ OK (uid=2000 shell)
+[4/5] starter binary ........ OK (/data/local/tmp/shizuku)
+[5/5] shizuku_server ........ UP (PID 7793, user shell)
+      rish functional probe . OK (rish -c id -> uid=2000 shell)
+VERDICT: UP — full chain verified                        -> exit 0
+(The script printed the new serial itself: dynamic detection demonstrated.)
+
+== recover.sh (new serial) ==
+serial ...................... adb-d2c6cbda-uWIKtV._adb-tls-connect._tcp.
+shizuku_server .............. already UP (PID 7793) — nothing to recover
+                                                      -> exit 0
+Idempotent branch: server was UP (survived the LADB restart); the script
+correctly assessed state through the NEW transport.
+
+== verify.sh (new serial) ==
+shizuku_server .............. UP (PID 7793, user shell)
+rish functional probe ....... OK (rish -c id -> uid=2000 shell)
+VERDICT: UP + FUNCTIONAL                                 -> exit 0
+
+PID before/after: 7793 -> 7793 (unchanged: server lifetime independent
+of the LADB app session).
+Direct rish: rish -c "id" -> uid=2000(shell) ... context=u:r:shell:s0
+
+Integrity: script SHA-256 identical before/after — no script modified.
+
+CONCLUSION
+----------
+SERIAL_CHANGE_VERIFIED
+
+1. LADB had SERIAL_OLD ...................... recorded          [OK]
+2. LADB returned with SERIAL_NEW ............ observed         [OK]
+3. SERIAL_OLD != SERIAL_NEW ................. proven           [OK]
+4. Scripts detected SERIAL_NEW dynamically .. doctor printed it [OK]
+5. doctor.sh exit 0 ......................... yes              [OK]
+6. Recovery procedure worked on new serial .. recover.sh exit 0,
+   correct state assessment (idempotent branch; the relaunch branch
+   was not exercised here — server never went DOWN — and remains
+   proven at checkpoint 3efedb7)                              [OK]
+7. verify.sh exit 0 -> UP + FUNCTIONAL ...... yes              [OK]
+8. rish functional after transport change ... yes              [OK]
+
+SCOPE (explicit)
+----------------
+This experiment proves DYNAMIC DETECTION OF THE LADB TRANSPORT only.
+It does NOT prove a watchdog, does NOT prove reboot persistence, and
+does NOT re-demonstrate a server relaunch (server stayed UP throughout;
+that branch was verified at 3efedb7).
+
+SIDE FINDINGS (documented, not separately experimented)
+-------------------------------------------------------
+- LADB serial can change format (host:port -> mDNS/TLS): exactly the
+  case the detection priority was designed for.
+- shizuku_server survived the LADB app restart (PID 7793 unchanged):
+  server lifetime is tied to the shell-identity daemon, not to the
+  LADB app session.
+=====================================================================

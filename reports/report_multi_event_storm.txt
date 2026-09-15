@@ -1,0 +1,70 @@
+EXPERIMENT REPORT — Multi-event failure storm under watchdog v1 (daemonized)
+Repo: ~/ladb-shizuku-recovery (standalone, local-only)
+Base checkpoint: a1ff0c4 (watchdog v1) on top of df7ce59 (token plate),
+8875abe, 83ec34f, 5ded4ee, 3efedb7
+Date: 2026-09-13
+Scope: sequential forced-DOWN events against a live daemon. Does NOT test
+reboot persistence, Termux force-stop, or simultaneous/overlapping events.
+
+OBSERVATION
+- Watchdog v1 daemon (runsv, session pid 32457) alive across many Termux
+  sessions (sv status >= 4079 s at start, 5131 s at end).
+- shizuku_server UP on PID 2442 (recovered autonomously by the daemon in v1).
+- After the operator reopened LADB, the daemon re-attached autonomously to
+  SERIAL_STORM = localhost:43459 (series: 38639 -> tls-mdns -> 37215 -> 43459).
+- Pre-storm baseline (daemon log lifetime): DOWN=2, recovery OK=2, FAILED=0
+  (the single events of v0 -> 2624 and v1 -> 2442).
+- Log quirk (documented): recovery counter restarts per watchdog session;
+  log is append-only, so the storm logged as recoveries #2, #3, #4.
+
+HYPOTHESIS
+A daemonized watchdog v1 can sustain repeated DOWN events: each kill -9
+produces exactly one DOWN detection and one delegated recover.sh recovery,
+with no duplicates, no overlaps, no false positives, no degradation.
+
+ACTION
+1. T0 confirmed: daemon alive, transport up, server PID 2442, baseline
+   counters + script hashes recorded.
+2. 3 sequential events: NAME-filtered lookup (awk '$3=="shizuku_server"'),
+   gate requiring exactly one server row, kill -9, wait for the daemon's own
+   "recovery #N OK" line (75 s timeout), 5 s settle.
+3. Post-storm reconciliation: log deltas, sv status, single watchdog session,
+   NAME-filtered rows x4 (N0-N3), verify.sh, script hashes.
+4. Honesty note: three earlier loop attempts were aborted by their own safety
+   gates (log-timing abort; grep -c exit-code chain halt; ps|grep self-match
+   yielding 5 rows) — in all three the gate fired BEFORE any kill; zero kills
+   outside the three logged events.
+
+EVIDENCE
+Kill chain: 2442 -> 6444 -> 7671 -> 8679
+
+Event 1: 06:11:38 kill -9 2442 | DOWN 06:11:44 cycle 495 (~6 s)
+         recovery #2 OK 06:12:03 -> PID 6444, N0-N3 stable, rish uid=2000(shell)
+Event 2: 06:12:10 kill -9 6444 | DOWN 06:12:13 cycle 496 (~3 s)
+         recovery #3 OK 06:12:32 -> PID 7671, N0-N3 stable, rish uid=2000(shell)
+Event 3: 06:12:38 kill -9 7671 | DOWN 06:12:42 cycle 497 (~4 s)
+         recovery #4 OK 06:13:01 -> PID 8679, N0-N3 stable, rish uid=2000(shell)
+
+Each recover.sh invocation printed "RECOVERY VERIFIED (mechanical +
+functional)" with N0=N1=N2=N3 and rish -c "id" OK.
+
+Reconciliation (deltas over baseline):
+- DOWN lines +3 (one per kill; transport-less period produced only skips).
+- recovery OK +3, FAILED +0  ->  kills == detections == recoveries.
+- Cycles strictly sequential: 495 -> 496 -> 497 (no overlapping recoveries).
+- Exactly one watchdog session (32457 under runsv 10952) throughout.
+- Post-storm: single server row PID 8679 across four consecutive queries.
+- verify.sh exit 0: UP (PID 8679) + rish functional -> UP + FUNCTIONAL.
+- Script hashes identical to base:
+  doctor.sh  555b1b92e01d286517b014ce20638e42432e2b4956fe0ed99acb8cda7799c2d8
+  recover.sh b71b1296eb4ea64532e8868bd5168f648f22f1a1f3218590015e3c59c6e1a353
+  verify.sh  28e7796cf48c366e777a9d0297b341d67423f89ea011b2c3373d2300823358d8
+  watchdog.sh 6f6ed1bd8f343ed4b2a5a144947153948fa716d6f923f993cef098aeda7983a0
+
+CONCLUSION
+MULTI_EVENT_STORM = VERIFIED (daemonized). Three consecutive forced DOWN
+events produced exactly three valid recoveries (new PID, stable N0-N3,
+functional rish), zero failures, zero duplicates, zero overlaps, zero false
+positives.
+NOT covered: REBOOT_PERSISTENCE, TERMUX_FORCE_STOP, simultaneous bursts
+(N=3, sequential, spaced >= one full recovery).

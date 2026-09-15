@@ -1,0 +1,121 @@
+=====================================================================
+PoC — RECUPERACIÓN DE SHIZUKU VÍA LADB (SIN PC)
+Fecha: 2026-09-13 · Xiaomi Mi 10 (umi) · HyperOS · aarch64
+Entorno: Termux en el dispositivo + transporte LADB (adbd local)
+Alcance: PoC mínimo. Watchdog: NO implementado (por diseño).
+=====================================================================
+
+OBSERVACIÓN
+-----------
+- Transporte ADB (LADB): localhost:38639 -> estado "device" (sin PC)
+- Identidad shell adb: uid=2000(shell) gid=2000(shell) context=u:r:shell:s0
+- Starter: /data/local/tmp/shizuku (16.680 bytes, ejecutable, prop. shell)
+- Servidor: shizuku_server UP, PID 12057, usuario shell
+- rish: ~/bin/rish + rish_shizuku.dex (kit exportado), patrón: rish -c "cmd"
+- Contexto previo: demo manual 2026-09-12 (ciclo 5704 -> 12057); al iniciar
+  este PoC el server seguía vivo con el PID 12057.
+
+HIPÓTESIS
+---------
+Si shizuku_server muere, un shell UID 2000 alcanzable desde LADB puede
+relanzarlo ejecutando el starter nativo /data/local/tmp/shizuku, SIN PC,
+SIN root y SIN tocar app_process/CLASSPATH. El éxito solo es demostrable
+con evidencia mecánica (proceso nuevo, PID distinto, estable en el tiempo)
+MÁS una prueba funcional post-recuperación vía rish.
+
+ACCIÓN
+------
+1. Crear ~/ladb-shizuku-recovery/ con 3 scripts POSIX autónomos:
+   - doctor.sh  : 5 chequeos en cadena (adb client -> transporte con serial
+                  dinámico -> uid 2000 -> starter -> server + prueba rish)
+                  exit: 0=UP · 1=DOWN/transporte · 2=DEGRADED
+   - recover.sh : si DOWN, lanza starter vía adb (nohup, background);
+                  estabilidad N0/N1/N2/N3 (mismo PID), pid-change (nuevo=OLD),
+                  prueba funcional rish -c "id". Idempotente.
+   - verify.sh  : server presente + prueba rish
+                  exit: 0=UP+FUNCTIONAL · 1=DOWN · 2=UP pero rish bloqueado
+2. doctor.sh -> server UP -> rama DOWN no aplicaba de inicio.
+3. Con aprobación explícita del usuario: ciclo forzado:
+   rish -c "kill -9 12057" (solo vía rish; adb UID 2000 no puede)
+   -> confirmación de ausencia por ps -> recover.sh -> verify.sh
+4. Evidencia registrada en ~/ladb-shizuku-recovery/{evidence.txt,oldpid.txt}
+
+EVIDENCIA
+---------
+== doctor ==
+[1/5] adb client ............ OK (/data/data/com.termux/files/usr/bin/adb)
+[2/5] LADB transport ........ OK (serial=localhost:38639)
+[3/5] shell identity ........ OK (uid=2000 shell)
+[4/5] starter binary ........ OK (/data/local/tmp/shizuku)
+[5/5] shizuku_server ........ UP (PID 12057, user shell)
+      rish functional probe . OK (rish -c id -> uid=2000 shell)
+VERDICT: UP — full chain verified                     -> exit 0
+
+== kill (ciclo forzado, aprobado) ==
+OLD_PID=12057
+rish -c "kill -9 12057" -> exit 255 (esperado: transporte rish muere con el server)
+ps -> CONFIRMED: shizuku_server absent                -> DOWN real
+
+== recover ==
+shizuku_server .............. DOWN (observed)
+starter ..................... present (/data/local/tmp/shizuku)
+action ...................... launching starter via adb (backgrounded)
+N0 .......................... new PID = 7793
+N1 .......................... PID = 7793
+N2 .......................... PID = 7793
+N3 .......................... PID = 7793
+stability ................... OK (same PID at N0..N3)
+pid-change .................. OK (12057 -> 7793)
+functional (rish -c id) ..... OK (uid=2000(shell) ... context=u:r:shell:s0)
+VERDICT: RECOVERY VERIFIED (mechanical + functional)  -> exit 0
+
+== verify ==
+shizuku_server .............. UP (PID 7793, user shell)
+rish functional probe ....... OK (rish -c id -> uid=2000 shell)
+VERDICT: UP + FUNCTIONAL                              -> exit 0
+
+Criterios (skill shizuku-rikka v1.1.0) — todos cumplidos:
+[OK] serial ADB dinámico (no hardcodeado)
+[OK] ausencia del server observada mecánicamente (ps)
+[OK] ejecución del starter observada
+[OK] nuevo PID != OLD_PID (7793 != 12057)
+[OK] estabilidad temporal N0/N1/N2/N3
+[OK] prueba funcional post-recovery vía rish
+
+CONCLUSIÓN
+----------
+- CRITERIO DE ÉXITO CUMPLIDO:
+  LADB -> UID 2000 -> starter -> shizuku_server -> verificación exitosa.
+- Cierre de la brecha del watchdog 2026-09-12: aquella demostración quedó
+  en SHIZUKU_FUNCTIONAL_RECOVERY = NOT_TESTED; esta ejecución pasó la
+  prueba rish post-recovery -> mechanical + functional verificados en
+  una sola sesión.
+- Restricciones respetadas: no se modificó Buffy; no se instaló ninguna
+  app; sin root; sin PC; sin app_process/CLASSPATH; sin arquitectura
+  innecesaria (3 scripts planos); reversible (mismo ciclo kill/relanzar
+  que la demo manual 5704->12057; nada borrado ni sobrescrito).
+- Watchdog: NO implementado (paso 9 del objetivo, por diseño).
+
+NOTAS DE OPERACIÓN
+------------------
+1. rish exige RISH_APPLICATION_ID y MANAGER_APPLICATION_ID en el entorno;
+   sin ellas aborta sin ejecutar nada (ocurrió en el primer intento).
+2. El exit 255 de rish tras matar el server NO es un fallo: el transporte
+   muere con el servidor. La verdad de ground es ps, no el exit code.
+3. adb shell (UID 2000) no puede matar al server (uid distinto):
+   matar solo vía rish.
+4. El puerto de LADB (38639) puede cambiar si LADB se reinicia (fallback
+   observado antes: 37685). Los scripts detectan el serial dinámicamente.
+5. Patrón del kit rish exportado: siempre "rish -c \"cmd\""; sin -c el
+   server trata el comando como path y muere con exit 127.
+
+ARTEFACTOS
+----------
+~/ladb-shizuku-recovery/doctor.sh    chequeo de cadena completa
+~/ladb-shizuku-recovery/recover.sh   recuperación mecánica + funcional
+~/ladb-shizuku-recovery/verify.sh    verificación final
+~/ladb-shizuku-recovery/evidence.txt evidencia en texto plano
+~/ladb-shizuku-recovery/oldpid.txt   OLD_PID=12057
+/sdcard/Download/poc_ladb_shizuku_recovery.md   este reporte (Markdown)
+/sdcard/Download/poc_ladb_shizuku_recovery.txt  este archivo (texto plano)
+=====================================================================

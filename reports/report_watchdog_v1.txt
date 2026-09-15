@@ -1,0 +1,91 @@
+=====================================================================
+EXPERIMENT — WATCHDOG V1 (daemonized supervision, runit runsv)
+Date: 2026-09-13
+Repo: ~/ladb-shizuku-recovery (canonical)
+History: 3efedb7 -> 5ded4ee -> 83ec34f -> 8875abe (consolidation)
+Device: Xiaomi Mi 10 (umi) · Android 13 (API 33) / HyperOS
+=====================================================================
+
+OBSERVATION
+-----------
+- v0 proved auto-recovery but only in-session (bg loop dies at session
+  teardown). v1 adds the daemon layer: service/shizuku-watchdog/run
+  (runit run script) + install-service.sh, wrapping watchdog.sh.
+- termux-services/runit were NOT installed; installed here
+  (termux-services 0.13-1 / runit 2.1.2-4 — first external package in
+  this series, required for the requested daemonization).
+
+HYPOTHESIS
+----------
+An sv/runsv-supervised watchdog, launched detached via
+start-stop-daemon and holding a Termux wake-lock, keeps supervising
+shizuku_server across session teardown, restarts its own loop if it
+dies, and autonomously recovers the server over the dynamic LADB
+transport — without duplicating recovery logic.
+
+ACTION
+------
+1. run script: cd repo -> termux-wake-lock -> exec ./watchdog.sh 10.
+2. Installed termux-services. Its runsvdir/service-daemon aggregator
+   dies instantly on this device (3 launch methods tried) while
+   individual runsv instances persist -> installer launches ONE
+   dedicated runsv per service (deviation documented in-script).
+3. Validated supervision lifecycle; ran the DOWN test with the daemon
+   supervising; investigated + fixed a disclosed bug (see E).
+
+EVIDENCE
+--------
+A. DAEMON SURVIVES SESSION TEARDOWN (v0 limitation closed):
+   runsv pid 10952 alive 04:33->04:49+ (~16 min) across ~15 command
+   sessions; watchdog session reached 845 s (sv status) before being
+   deliberately killed for test B; wake-lock held by run script.
+
+B. RUNSV RESTARTS THE WATCHDOG LOOP:
+   kill 10954 -> runsv respawned it (log: 04:47:37 "watchdog v0
+   started", new session pid 32457). Supervision-of-the-supervisor.
+
+C. AUTONOMOUS DOWN DETECTION + RECOVERY:
+   04:47:37 cycle 1: UP serial=localhost:37215 pid=31371
+   T0: rish -c "kill -9 31371"  (no session tending the server)
+   cycle N: DOWN (ps ok, no server) -> invoking recover.sh
+   recover.sh: N0..N3=2442 · stability OK · rish -> uid=2000(shell)
+   04:48:26 recovery #1 OK (new pid=2442)
+   cycles: UP pid=2442 (sustained) · sv status (pid 32457) 76s
+   Detection <= 10s (one interval); recovery ~19s; criteria enforced
+   by recover.sh inside the automated flow.
+
+D. CONSERVATIVE TRANSPORT-DOWN, LIVE:
+   LADB closed 04:33-04:40 -> 39+ consecutive "no adb transport —
+   skipping" cycles, NO false recovery triggered.
+
+E. DISCLOSED DEFECT FIXED IN THIS INCREMENT:
+   v0's detect_serial() implemented ONLY the tls-connect level despite
+   its comment (worked before because serials were TLS-format). When
+   the transport returned as localhost:37215 (host:port) the daemon
+   was blind (cycles 38-77). Differential diagnosis: identical env,
+   single adb server (pid 11029), fresh detached clients saw the
+   transport -> cause isolated to the script. Fix: full priority chain
+   (tls -> host:port -> any device), verified live. Honesty: the
+   daemon did NOT recover the earlier death (pid 2624) — it happened
+   while the daemon was blind; recovered manually (-> 31371). Daemon-
+   handled DOWN events in this experiment: exactly one (31371->2442).
+
+CONCLUSION
+----------
+WATCHDOG_V1 = VERIFIED (daemonized, single DOWN event)
+
+[OK] supervision survives session teardown (16+ min, many sessions)
+[OK] runsv auto-restarts the watchdog loop (observed)
+[OK] daemon recovered a forced DOWN autonomously (31371 -> 2442)
+[OK] transport-down conservatively skipped (live)
+[OK] both serial formats covered after the fix
+
+Still NOT tested: REBOOT_PERSISTENCE (Termux:Boot), MULTI_EVENT_STORM
+(one daemon-handled event here), force-stop of the Termux app itself.
+
+Token board: WATCHDOG_DAEMON_PERSISTENCE = NOT_TESTED -> VERIFIED
+(session-teardown scope). Never a bare "WATCHDOG = VERIFIED".
+
+End state: daemon LEFT RUNNING (that is v1's purpose). Revert with
+./install-service.sh stop | uninstall.
+=====================================================================

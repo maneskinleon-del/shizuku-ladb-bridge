@@ -1,0 +1,216 @@
+=====================================================================
+EXPERIMENT — REBOOT PERSISTENCE (Termux:Boot scope; H3 NOT tested)
+Reboot date: 2026-09-14 22:36 (evidence ~22:36-22:54); registered 2026-09-15
+Repo: ~/ladb-shizuku-recovery (canonical, standalone)
+Checkpoint of departure: d191eb4 (clean; only reboot_boot_evidence.log
+untracked on disk — it survived the reboot by design)
+Device: Xiaomi Mi 10 (umi) · Android 13 (API 33) / HyperOS
+Preregistration: report_reboot_persistence_prestate.txt (H1-H4)
+Addendum: report_reboot_persistence_prestate_addendum.txt (prep ABORTED;
+com.termux.boot NOT installed; user-directed reboot; H2/H3 UNTESTABLE)
+Companion log: reboot_boot_evidence.log (written by the boot glue at boot)
+=====================================================================
+
+0. WHAT THIS EXPERIMENT IS AND IS NOT
+-------------------------------------
+User-directed reboot WITHOUT prerequisites (addendum): Termux:Boot was
+never installed; the transport was ABSENT at reboot time. Mechanically
+tested: the boot-time supervision chain (boot glue + termux-services)
+and the conservatism of the watchdog while blind. NOT tested:
+
+- H3 / REBOOT_AUTONOMOUS_RECOVERY = NOT_TESTED. No dead post-reboot
+  server was recovered: the server was already UP (PID 6754) when the
+  transport returned. 27 conservative skips, then UP. No recovery was
+  delegated — none was needed, none occurred.
+- The server did NOT literally survive as a process: pre-reboot PID
+  2593 (itself recovered from an earlier DOWN that same evening;
+  8679 was dead before that) -> post-reboot PID 6754. Correct
+  phrasing: "Shizuku was functional post-reboot without the watchdog
+  having to perform a server recovery during this experiment."
+- The transport was restored MANUALLY via LADB by the operator:
+  MANUAL_INTERVENTION (transport only), NOT autonomous recovery.
+
+Per the addendum: no token flips beyond the scope explicitly recorded
+here. REBOOT_PERSISTENCE = VERIFIED is claimed ONLY under the scoped
+meaning below; the preregistered app-driven H2 was inoperative and H3
+was not exercised at all.
+
+OBSERVATION (pre-reboot, mechanically captured)
+-----------------------------------------------
+- Repo clean at d191eb4; scripts byte-identical to the base freeze.
+- Boot glue existed and was executable:
+  ~/.termux/boot/shizuku-watchdog-boot.sh (-rwx------, 713 B, Sep 13
+  12:28 — created at addendum time, INERT then).
+- reboot_boot_evidence.log did NOT exist yet (created by the boot).
+- Supervision alive: runsv shizuku-watchdog active; watchdog.sh running.
+- Transport at that point: localhost:39703 (state device).
+
+HYPOTHESIS (per preregistration; abbreviated)
+---------------------------------------------
+H1: shizuku_server does NOT survive the reboot (new PID expected).
+H2 (REBOOT_BOOT_SUPERVISION): runsvdir/runsv/watchdog already running
+    at first post-boot inventory WITHOUT opening Termux interactively.
+H3 (REBOOT_AUTONOMOUS_RECOVERY): watchdog detects server DOWN after
+    the transport returns and recover.sh relaunches it autonomously.
+H4 (REBOOT_PERSISTENCE): H2 AND H3 AND full-chain functionality.
+Declared before the fact (addendum): H2 and H3 UNTESTABLE this reboot;
+H4 must not flip. The reboot proceeded by explicit user decision.
+
+ACTION (what actually happened, in order)
+-----------------------------------------
+1. Reboot performed by the user OUTSIDE Termux (normal Android
+   reboot). Everything Termux-UID died — that was the experiment.
+   ~1 min wait; neither Termux nor LADB opened in that first window.
+2. Termux opened ONLY to collect evidence (no manual starts).
+3. LADB opened afterwards to restore the transport — recorded as
+   MANUAL_INTERVENTION (transport restoration only). No manual server
+   action at any point; recover.sh never run by hand; scripts
+   unmodified.
+
+EVIDENCE (all mechanically observed)
+------------------------------------
+1. BOOT-TIME SUPERVISION — REBOOT_BOOT_SUPERVISION = VERIFIED
+   reboot_boot_evidence.log (written BEFORE any interactive session;
+   new file in the tree):
+
+     === boot 2026-09-14 22:36:20 ===
+     runsvdir started by boot script
+     run: /data/data/com.termux/files/usr/var/service/shizuku-watchdog: (pid 12658) 3s
+
+   Post-boot processes observed: runsvdir 12649 · runsv
+   shizuku-watchdog 12651 · watchdog.sh 12658.
+
+   Distinction recorded: preregistered H2 expected Termux:Boot
+   (com.termux.boot) APP-driven supervision; that app was NOT
+   installed. What ran was the boot glue script in ~/.termux/boot/,
+   executed by Termux:Boot-plugin infrastructure at device boot,
+   before any interactive open. Token claimed at this BOOT-GLUE
+   scope; the app-driven variant remains untested.
+
+2. TRANSPORT INITIALLY ABSENT — watchdog stayed conservative
+   First post-boot `adb devices`: EMPTY list (no transport).
+   watchdog.log, post-boot session (new "watchdog v0 started" at
+   22:36:21, counter reset — new process, same mechanics as
+   force-stop):
+
+     2026-09-14 22:36:21 watchdog v0 started (interval=10s, log=pwd)
+     2026-09-14 22:36:24 cycle 1: no adb transport — skipping (transport down is NOT server DOWN)
+     ...
+     2026-09-14 22:40:48 cycle 27: no adb transport — skipping (transport down is NOT server DOWN)
+
+   27 consecutive conservative skips (~4.5 min) while blind: zero
+   false recoveries. DOWN criterion held — "transport down is NOT
+   server DOWN".
+
+3. MANUAL_INTERVENTION — transport restored via LADB
+   Operator opened LADB; transport returned as localhost:37003
+   (fifth serial rotation in the series: 43459 -> 42125 -> 38121 ->
+   39703 -> 37003). Manual transport restoration ONLY; nothing else
+   touched.
+
+4. SERVER POST-REBOOT — UP when first observable (H1-consistent)
+   With the transport available:
+
+      6754 shell        shizuku_server
+
+   shizuku_server = PID 6754 — a NEW PID (pre-reboot last-known PID
+   was 2593, itself the product of a same-evening recovery at 22:32:
+   8679 had gone DOWN and was relaunched on serial localhost:39703).
+   The server did not literally persist across reboot as a process;
+   a fresh instance was already running when the transport returned.
+   WHO started it is NOT determinable from the collected evidence
+   (candidates: Shizuku app autostart, adbd starter, operator-
+   adjacent actions around LADB) — recorded as unknown, not guessed;
+   immaterial to H3 either way (no recovery was delegated).
+
+   Watchdog cycles after transport restoration (same process):
+
+     2026-09-14 22:40:58 cycle 28: UP serial=localhost:37003 pid=6754
+     2026-09-14 22:41:08 cycle 29: UP serial=localhost:37003 pid=6754
+     2026-09-14 22:41:39 cycle 32: UP serial=localhost:37003 pid=6754
+
+   First observed UP: cycle 28 at 22:40:58 — correct detection on the
+   first cycle with a transport, zero recovery actions in between.
+
+5. FUNCTIONAL PROOF — SHIZUKU_FUNCTIONAL_POST_REBOOT = VERIFIED
+
+     == ladb-shizuku-recovery :: verify ==
+     serial ...................... localhost:37003
+     shizuku_server .............. UP (PID 6754, user shell)
+     rish functional probe ....... OK (rish -c id -> uid=2000 shell)
+     VERDICT: UP + FUNCTIONAL
+
+   verify.sh exit 0. Full chain post-reboot: transport -> UID 2000 ->
+   shizuku_server -> rish functional.
+
+6. BOUNDARY DATA (same-evening context, mechanically from watchdog.log)
+
+     2026-09-13 07:39:21 cycle 418: DOWN ... -> invoking recover.sh
+     2026-09-13 07:39:21 recovery #1 FAILED (recover.sh exit=1)
+       [pre-addendum; transport died mid-recovery]
+     2026-09-14 22:32:18 cycle 136: DOWN serial=localhost:39703 (ps ok, no shizuku_server) -> invoking recover.sh
+     2026-09-14 22:32:37 recovery #1 OK (new pid=2593)
+       [pre-reboot; genuine DOWN->recovery, previous session]
+     2026-09-14 22:36:21 watchdog v0 started (interval=10s, log=pwd)
+       [post-boot; counter reset]
+     2026-09-14 22:40:58 cycle 28: UP serial=localhost:37003 pid=6754
+       [first UP, post-transport]
+
+   Across the reboot boundary: 27 skips -> first UP at 6754 ->
+   sustained UP (>= 60 cycles, 22:40-22:54, log still growing at
+   evidence time). NO DOWN line, NO recovery line, NO FAILED line in
+   the entire post-reboot session.
+
+CONCLUSION
+----------
+REBOOT_PERSISTENCE = VERIFIED (boot-glue supervision scope — bounded)
+REBOOT_BOOT_SUPERVISION = VERIFIED (boot-glue scope; app variant untested)
+SHIZUKU_FUNCTIONAL_POST_REBOOT = VERIFIED
+REBOOT_AUTONOMOUS_RECOVERY = NOT_TESTED
+
+Mechanically demonstrated (the five claims of the scoped verdict):
+1. Termux:Boot-plugin infrastructure executed the bootstrap from
+   ~/.termux/boot/ at device boot (evidence log 22:36:20, before any
+   interactive session).
+2. runsvdir + runsv + watchdog started from boot, unattended (PIDs
+   12649/12651/12658), without opening Termux interactively.
+3. The watchdog remained conservative without a transport — 27
+   consecutive skips, zero false recoveries while blind.
+4. After the operator manually restored ADB via LADB, the watchdog
+   correctly detected the already-running server (first UP cycle 28,
+   PID 6754, zero recovery actions).
+5. verify.sh confirmed full functionality post-reboot (UP +
+   FUNCTIONAL, rish OK).
+
+Explicitly NOT demonstrated:
+- Autonomous recovery of a dead server post-reboot (H3) — the core
+  scenario of the original preregistration. A valid future attempt
+  requires, per the preregistration: transport alive BEFORE reboot,
+  com.termux.boot installed + whitelisted, and the server DOWN when
+  the transport returns.
+- Termux:Boot-app-driven supervision (preregistered H2 variant).
+- Process survival of the server across reboot — disproven in the
+  expected direction (6754 != 2593 != 8679), consistent with H1.
+- Who launched the post-reboot server instance (no evidence; unknown).
+
+OVER-INTERPRETATION GUARD (verbatim policy):
+It is NOT correct to say "the watchdog recovered Shizuku after the
+reboot", and NOT correct to say "Shizuku survived the reboot as a
+process". Accurate statement: "Shizuku was functional post-reboot
+without the watchdog having to perform a server recovery during this
+experiment; boot-time supervision of the watchdog itself was
+mechanically verified."
+
+SIDE FINDINGS
+-------------
+- Serial rotation re-demonstrated under the strongest condition yet
+  (full reboot): 39703 -> 37003; dynamic detection held unmodified.
+- The watchdog session boundary (counter reset to cycle 1 at
+  22:36:21) is mechanical proof the pre-reboot watchdog process died
+  with the reboot — same signature as the force-stop boundary (new
+  process, not survival).
+- The boot glue's evidence-before-interaction design worked exactly
+  as intended: the first artifact of the experiment
+  (reboot_boot_evidence.log) exists precisely because no human
+  opened anything first.
+=====================================================================

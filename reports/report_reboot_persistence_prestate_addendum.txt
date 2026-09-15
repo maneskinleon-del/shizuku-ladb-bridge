@@ -1,0 +1,80 @@
+REBOOT_PERSISTENCE — PRE-REBOOT ADDENDUM (prep ABORTED; user-directed reboot without prerequisites)
+Written 2026-09-13 (~12:30) from inside Termux, BEFORE the reboot.
+Companion to report_reboot_persistence_prestate.txt (preregistration,
+sha256 7a947948..., which stays UNCHANGED — verified below).
+This addendum is itself a pre-registration of an ABORT: nothing here is an
+experiment result.
+
+1. PREP OBSTACLES (mechanical, timestamped)
+- rish initially failed: "RISH_APPLICATION_ID is not set". The exported kit
+  (~/bin/rish) defaults the var to the literal "PKG" when unset — client-side
+  env gap, NOT a Shizuku failure. Canonical fix (skill shizuku-rikka):
+    export RISH_APPLICATION_ID=com.termux
+    export MANAGER_APPLICATION_ID=moe.shizuku.privileged.api
+  then always `rish -c "cmd"`.
+- Shizuku server DOWN since 07:39: watchdog.log cycle 418 (07:39:21) detected
+  a REAL server DOWN (serial localhost:38121, "ps ok, no shizuku_server") and
+  delegated recover.sh; the transport disappeared mid-recovery
+  ("FAIL: no adb transport (state 'device')") -> "recovery #1 FAILED". Then
+  ~1,850 consecutive conservative skip cycles (~4.7 h) — the DOWN criterion
+  held with zero false recoveries while blind.
+- Transport fully gone at prep time: `adb mdns check/services` unsupported by
+  this platform-tools build and lists nothing; `adb connect 127.0.0.1:38121`
+  -> Connection refused; `getprop service.adb.tls.port` empty -> Wireless
+  Debugging listener OFF. Measurement limits recorded: `settings get` from
+  Termux UID -> SecurityException (INTERACT_ACROSS_USERS); /proc/net/tcp*
+  unreadable for this UID (SELinux; even running sshd invisible); logcat not
+  readable from Termux UID. Root cause of the transport loss is therefore NOT
+  determinable from inside Termux — recorded as unknown, not guessed.
+- Recovery options evaluated in-session (Shizuku app start, PC-over-USB) all
+  require the operator; without shell identity Termux cannot restart the
+  server, and without a transport it cannot run pm install.
+
+2. USER DECISION (in-session, ~12:25): "Skip prep, reboot anyway" — reboot
+   WITHOUT installing com.termux.boot and WITHOUT restoring Shizuku.
+
+3. CONSEQUENCES (recorded BEFORE the reboot, per preregistration logic)
+- H2 REBOOT_BOOT_SUPERVISION: UNTESTABLE this reboot (com.termux.boot NOT
+  installed; the boot script below is inoperable without the app).
+- H3 REBOOT_AUTONOMOUS_RECOVERY: UNTESTABLE this reboot (no transport ->
+  the watchdog cannot observe DOWN nor relaunch; post-boot it will keep
+  skipping while blind).
+- H4 REBOOT_PERSISTENCE: remains NOT_TESTED regardless of reboot outcome.
+  THIS REBOOT MUST NOT BE RECORDED AS AN EXPERIMENT RESULT.
+- What the reboot can still yield (after manual transport/server restoration,
+  NEXT session): an H1-CONSISTENT OBSERVATION ONLY — shizuku_server absent
+  after reboot; its first restart carries a NEW PID != 8679. Observations are
+  logged, but no token flips.
+- Boot script ~/.termux/boot/shizuku-watchdog-boot.sh CREATED at execution
+  time (verbatim from the dossier, chmod 700, `sh -n` OK) so a FUTURE valid
+  attempt (after Termux:Boot is actually installed + whitelisted) needs no
+  re-derivation. It is INERT for this reboot.
+
+4. PRE-REBOOT EVIDENCE FREEZE (dossier step 4, still executed)
+- watchdog.log -> /sdcard/Download/ladb_shizuku_watchdog_pre_reboot.log
+  (frozen: last non-skip event = cycle 418 DOWN + recovery #1 FAILED).
+- preregistration + this addendum -> /sdcard/Download/ladb_reboot_*.txt
+- sha256 of every frozen file recorded at the commit; the preregistration
+  must still hash 7a947948... (byte-unchanged).
+
+5. POST-REBOOT RESUME (NEXT session, in order; this session dies at reboot)
+  0. cat ~/ladb-shizuku-recovery/reboot_boot_evidence.log 2>/dev/null
+     (expected ABSENT — Termux:Boot not installed).
+  1. Inventory inside Termux, BEFORE restoring anything:
+       cd ~/ladb-shizuku-recovery
+       ps -ef | awk 'NR==1 || $1=="u0_a364"'
+     Expected: NONE of the pre-reboot PIDs survive (watchdog 11863,
+     runsvdir 11848, runsv 11855, the adb server, this session).
+     Verify supervision auto-revival by termux-services at first Termux
+     start: sv status .../var/service/shizuku-watchdog.
+  2. Restore transport, labeled MANUAL_INTERVENTION: Dev options -> Wireless
+     Debugging ON; then from Termux:
+       export RISH_APPLICATION_ID=com.termux MANAGER_APPLICATION_ID=moe.shizuku.privileged.api
+       P=$(getprop service.adb.tls.port); adb connect "127.0.0.1:$P"
+  3. Do NOT start the server from the Shizuku app if step 2's connect
+     succeeded: leave the DOWN state to the watchdog — its recovery here is
+     logged as MANUAL-ASSISTED OBSERVATION (transport was manual), NOT H3.
+  4. Functional proof after recovery: ./verify.sh; rish -c id -> uid=2000.
+  5. Do NOT flip any token. REBOOT_PERSISTENCE stays NOT_TESTED. A future
+     VALID attempt requires: Termux:Boot installed + whitelisted + transport
+     alive BEFORE reboot, per the preregistration.

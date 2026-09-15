@@ -1,0 +1,113 @@
+=====================================================================
+EXPERIMENT — TERMUX FORCE-STOP (app-level kill boundary)
+Date: 2026-09-13
+Repo: ~/ladb-shizuku-recovery (canonical, standalone)
+Checkpoint of departure: b9ca628 (clean; pre-state dossier untracked on disk)
+Device: Xiaomi Mi 10 (umi) · Android 13 (API 33) / HyperOS
+Pre-state dossier: report_termux_force_stop_prestate.txt (written 06:25
+approx, BEFORE the force-stop, from inside Termux; survived on disk)
+=====================================================================
+
+OBSERVATION
+-----------
+- Repo clean at b9ca628; scripts byte-identical to the base freeze.
+- Daemon: runsv 10952 -> watchdog session 32457, alive 5713 s.
+- Transport: localhost:43459. Server: PID 8679 (user shell), UP.
+- Termux-UID (u0_a364) dying set (per pre-state dossier): runsvdir
+  aggregators 1413/8851/31425/32113; runsv 6648/6649/6650/10952;
+  adb server 11029; shells + gitstatusd; freebuff agent 19176+;
+  watchdog session 32457 + sleep 29868.
+- Outside the kill radius: shizuku_server 8679 (UID shell, adbd
+  starter), LADB app (own UID).
+
+HYPOTHESIS
+----------
+Android force-stop of com.termux kills every Termux-UID process
+(supervision, watchdog, adb server) but NOT shizuku_server (UID
+shell). After reopening Termux, server still UP (same PID if
+untouched) and supervision restorable. Distinguishes "session
+teardown" (WATCHDOG_V1 scope) from "app-level kill" — no reboot.
+
+ACTION
+------
+1. Pre-state dossier written to disk BEFORE the trigger (survives
+   the kill by design; it did).
+2. Trigger performed by the user OUTSIDE Termux:
+      am force-stop com.termux
+   The writing session died with the kill — that was the experiment.
+3. Termux reopened; runbook executed in order; inventory taken
+   BEFORE restoring anything. No reboot, no server intervention,
+   scripts unmodified.
+
+EVIDENCE
+--------
+1. Post-stop inventory (nothing restored yet):
+   runsvdir 11848 (PPID 1) -> runsv shizuku-watchdog 11855 /
+   ssh-agent 11856 / sshd 11857 / cupsd 11858; watchdog.sh loop
+   PID 11863. NONE of the pre-state PIDs survived. termux-services
+   AUTO-REVIVED the whole service tree at app start, before any
+   manual action. Old adb server 11029 dead (respawns on demand).
+
+2. Server state (outside Termux):
+   adb devices -> localhost:42125  (NEW serial; was 43459)
+   adb -s localhost:42125 shell "ps -A -o PID,USER,NAME"
+     | awk '$3=="shizuku_server"'
+     ->  8679 shell        shizuku_server
+   Single row, SAME PID 8679, user shell: server untouched.
+   Serial changed as a consequence of the adb-server death (mdns
+   re-discovery); scripts detected it dynamically, unmodified.
+
+3. Supervision:
+   sv status .../service/shizuku-watchdog
+     -> run: (pid 11863) 86s   [auto-revived; no manual start]
+
+4. Functional proof:
+   ./verify.sh
+     serial .................... localhost:42125
+     shizuku_server ............ UP (PID 8679, user shell)
+     rish functional probe ..... OK (rish -c id -> uid=2000 shell)
+     VERDICT: UP + FUNCTIONAL   exit=0
+
+5. Watchdog continuity (log boundary):
+   06:27:49 cycle 584: UP serial=localhost:43459 pid=8679  [old]
+              [ ~26 s gap — the force-stop window ]
+   06:28:15 watchdog v0 started (interval=10s, log=pwd)   [new]
+   06:28:15 cycle 1:   UP serial=localhost:42125 pid=8679
+   ... cycles 2-10: UP serial=localhost:42125 pid=8679
+   Cycle counter reset to 1: the old watchdog DIED with the app;
+   a NEW instance was respawned by runsv. Same server PID 8679
+   across the gap = coverage continuity, server never DOWN.
+
+Anomaly (pre-existing, unrelated to the trigger):
+   06:25:47 cycle 572: UP serial=localhost:43459 pid=6275 — single
+   cycle with a foreign PID, self-corrected at 573; belongs to the
+   previous session's noise, recorded for completeness.
+
+CONCLUSION
+----------
+TERMUX_FORCE_STOP = VERIFIED (app-level kill scope)
+
+1. Force-stop killed every Termux-UID process (supervision, watchdog,
+   adb server).                                              OK
+2. shizuku_server survived, SAME PID 8679 (UID shell, independent
+   of the Termux app).                                       OK
+3. Supervision auto-revived by termux-services at app start
+   (zero manual action).                                     OK
+4. verify.sh exit 0 -> UP + FUNCTIONAL on the new serial.     OK
+5. Log continuity across the gap (new session, same PID).     OK
+
+Scope (explicit):
+- The watchdog did NOT survive as a process (cycle reset proves it).
+  What crossed the app-level kill boundary: (a) the server itself,
+  (b) the supervision architecture via auto-revival. WATCHDOG_V1's
+  "daemonized" scope remains session-teardown, NOT force-stop.
+- REBOOT_PERSISTENCE remains NOT_TESTED (reboot deliberately
+  skipped).
+
+Side findings:
+- Serial changed 43459 -> 42125 as a CONSEQUENCE of the force-stop;
+  dynamic detection held with both the transport broker and the adb
+  server dead.
+- App-level kill is strictly more destructive than session teardown,
+  and the system still self-heals on next app start.
+=====================================================================

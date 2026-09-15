@@ -1,0 +1,83 @@
+=====================================================================
+EXPERIMENT — WATCHDOG V0 (auto-recovery of shizuku_server)
+Date: 2026-09-13
+Repo: ~/ladb-shizuku-recovery (canonical)
+Base: 3efedb7 (PoC VERIFIED) -> 5ded4ee (SERIAL_CHANGE_VERIFIED)
+Device: Xiaomi Mi 10 (umi) · Android 13 (API 33) / HyperOS
+=====================================================================
+
+OBSERVATION
+-----------
+- Repo clean at 5ded4ee; doctor/recover/verify untouched (SHA-256
+  re-verified at commit time).
+- Transport: adb-d2c6cbda-uWIKtV._adb-tls-connect._tcp. (serial-change
+  experiment's mDNS/TLS serial).
+- Pre-test: server DOWN (operational incident outside this experiment:
+  a monitoring session died mid-command). Restored manually via
+  recover.sh -> PID 385, stable N0-N3, rish OK. That run is state
+  restoration, not part of the watchdog test (it incidentally
+  re-validated the relaunch branch on the new-format serial).
+
+HYPOTHESIS
+----------
+A minimal loop that (a) detects the serial dynamically, (b) uses the
+mechanically correct DOWN criterion — adb "ps" succeeds AND no
+shizuku_server row; an unavailable transport is NOT server death — and
+(c) delegates recovery entirely to recover.sh, restores the server
+unattended without duplicating recovery logic.
+
+ACTION
+------
+1. Added watchdog.sh (v0) + .gitignore for its runtime log.
+2. Started watchdog (3s), observed UP cycles.
+3. Forced ONE DOWN event: rish -c "kill -9 <pid>".
+4. Watchdog (not operator) detected DOWN and recovered.
+5. Stopped watchdog by exact PID; verified scripts unmodified; committed.
+
+EVIDENCE (watchdog.log — single session)
+----------------------------------------
+03:46:11 watchdog v0 started (interval=3s)
+03:46:11-03:46:21  cycles 1-4: UP pid=385
+T0=03:46:22  rish -c "kill -9 385"   (forced DOWN, operator)
+03:46:24 cycle 5: DOWN (ps ok, no shizuku_server) -> invoking recover.sh
+  recover.sh: DOWN -> starter -> N0=2624 N1=2624 N2=2624 N3=2624
+              stability OK · pid-change OK · rish -> uid=2000(shell)
+              VERDICT: RECOVERY VERIFIED (mechanical + functional)
+03:46:43 recovery #1 OK (new pid=2624)
+03:46:46-03:47:34  cycles 6-21 (16 consecutive): UP pid=2624
+PID before=385 / after=2624
+direct rish post-cycle: uid=2000(shell) ...
+watchdog stopped by exact PID 1769 — confirmed dead
+
+Detection latency: <= ~3s (one interval) · full auto-recovery ~19s ·
+sustained UP ~1min post-recovery.
+
+CONCLUSION
+----------
+WATCHDOG_V0 = VERIFIED (single forced DOWN event, in-session run).
+
+Proven:
+[OK] DOWN detected mechanically (transport-down correctly excluded)
+[OK] recovery delegated to recover.sh (zero duplicated logic; its own
+     mechanical + functional criteria passed inside the automated flow)
+[OK] new PID 2624 != 385, stable N0-N3, rish-functional, unattended
+
+NOT proven (out of scope for v0):
+- Daemon persistence: a backgrounded watchdog dies when its Termux
+  session tears down (observed while setting up this test). v0 is an
+  in-session supervisor; daemonization (Termux:service / wake-lock)
+  is future work.
+- Reboot persistence (server or watchdog).
+- Multi-event / failure-storm behavior (one event in scope).
+
+Canonical scope sentence:
+WATCHDOG_V0 = VERIFIED — auto-recovery on a single forced DOWN event
+verified in-session; daemonization, reboot persistence and multi-event
+behavior not tested in this increment.
+
+INTEGRITY
+---------
+doctor.sh / recover.sh / verify.sh SHA-256 unchanged from base
+checkpoint — the watchdog adds files, it modifies nothing existing.
+New artifacts: watchdog.sh, .gitignore, this report, CHECKPOINT addendum.
+=====================================================================

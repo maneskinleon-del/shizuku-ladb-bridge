@@ -1,0 +1,44 @@
+# Evidencia — PoC recuperación Shizuku vía LADB (Termux, sin PC)
+Fecha: 2026-09-13 · Dispositivo: Mi 10 (umi), HyperOS · Script: doctor/recover/verify POSIX sh
+
+## Entorno verificado
+- Transporte: localhost:38639 → estado "device" (LADB adbd local; sin PC)
+- Identidad adb: uid=2000(shell) gid=2000(shell) context=u:r:shell:s0
+- Starter: /data/local/tmp/shizuku (16680 bytes, ejecutable, propietario shell)
+- rish: ~/bin/rish + rish_shizuku.dex (kit exportado; patrón `rish -c "cmd"`)
+- env obligatorio: RISH_APPLICATION_ID=com.termux, MANAGER_APPLICATION_ID=moe.shizuku.privileged.api
+
+## Secuencia mecánica observada (una misma sesión)
+1. doctor.sh (PRE): exit 0 — shizuku_server UP, PID 12057, rish OK
+2. kill: OLD_PID=12057 → rish -c "kill -9 12057" (exit 255 del transporte rish, esperado:
+   el servidor muere bajo sus pies) → ps confirma AUSENCIA de shizuku_server
+3. recover.sh: exit 0
+   - DOWN observado → starter presente → lanzamiento por adb (nohup, background)
+   - N0: nuevo PID = 7793
+   - N1: 7793 · N2: 7793 · N3: 7793 → estabilidad OK
+   - pid-change: OK (12057 → 7793)
+   - functional: rish -c "id" → uid=2000(shell) OK
+   - VERDICT: RECOVERY VERIFIED (mechanical + functional)
+4. verify.sh (POST): exit 0 — UP (PID 7793, user shell) + rish OK
+
+oldpid.txt: OLD_PID=12057
+
+## Criterios de la skill (shizuku-rikka v1.1.0)
+- serial ADB dinámico: OK (detectado, no hardcodeado)
+- servidor ausente observado mecánicamente: OK (ps)
+- ejecución del starter observada: OK (proceso apareció tras lanzarlo)
+- nuevo PID ≠ OLD_PID: OK (7793 ≠ 12057)
+- estabilidad temporal N0/N1/N2/N3: OK
+- prueba funcional post-recovery vía rish: OK → esta vez SÍ se cerró
+  (a diferencia del watchdog 2026-09-12, donde quedó NOT_TESTED)
+
+## Conclusión
+LADB → UID 2000 → starter → shizuku_server → verificación exitosa: CUMPLE.
+Recovery completo demostrado mecánica y funcionalmente en una sola ejecución.
+Watchdog: NO implementado (fuera de alcance de este PoC, por diseño).
+
+## Notas de operación
+- adb shell UID 2000 NO puede matar al server (uid distinto): matar solo vía rish.
+- El exit 255 de rish tras el kill no es fallo: es el transporte muriendo con el server.
+- Si LADB se reinicia, el puerto 38639 puede cambiar: los scripts detectan el serial
+  dinámicamente; nunca hardcodear el endpoint.
