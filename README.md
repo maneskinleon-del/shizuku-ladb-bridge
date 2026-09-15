@@ -103,14 +103,23 @@ exists before anyone opens Termux. The execution left direct evidence:
 `evidence/reboot_boot_evidence.log` was written by the boot script at
 2026-09-14 22:36:20, **before any interactive session existed**.
 
-One clarification so nothing is over-read: during the experiments the
-Termux:Boot app itself was never installed — what mechanically ran was the
-boot script, executed by the Termux:Boot-plugin infrastructure. That is what
-the evidence matrix records as `REBOOT_BOOT_SUPERVISION = VERIFIED`
-(**boot-glue scope**), while **Termux:Boot app-driven supervision
-(`com.termux.boot`) = NOT_TESTED**. The evidence matrix in §3 is the
-authority. This PoC does **not** claim that Termux:Boot guarantees automatic
-recovery of Shizuku after any reboot.
+To read this correctly, keep two different claims apart — they are not the
+same statement:
+
+- **Demonstrated:** the boot script in `~/.termux/boot/` (the "boot glue")
+  executed at device boot, unattended, and raised the supervision stack —
+  `REBOOT_BOOT_SUPERVISION = VERIFIED`, at **boot-glue scope** only. During
+  the experiments the Termux:Boot app itself was never installed; what
+  mechanically ran was the script, executed by the Termux:Boot-plugin
+  infrastructure.
+- **Not demonstrated:** supervision driven specifically by the Termux:Boot
+  app — `Termux:Boot app-driven supervision (com.termux.boot) = NOT_TESTED`.
+
+"Boot supervision happened" and "the `com.termux.boot` app started the
+supervision" are therefore different statements; only the first was
+demonstrated. The evidence matrix in §3 is the authority. This PoC does
+**not** claim that Termux:Boot guarantees automatic recovery of Shizuku
+after any reboot.
 
 ### 1.5 What was built: the recovery watchdog
 
@@ -276,9 +285,10 @@ This PoC does **not** claim:
 - that **Shizuku survives a reboot** — it does not survive as a process
   (post-reboot PID was new);
 - that **the watchdog autonomously recovers Shizuku after any reboot** —
-  autonomous post-reboot recovery was never exercised (`NOT_TESTED`; in the
-  reboot experiment the server was already running when the transport
-  returned and the watchdog performed no recovery);
+  `REBOOT_AUTONOMOUS_RECOVERY = NOT_TESTED`: autonomous post-reboot recovery
+  was never exercised (in the reboot experiment the server was already
+  running when the transport returned and the watchdog performed no
+  recovery);
 - that **Termux:Boot guarantees automatic recovery** — only boot-time
   *supervision of the watchdog itself* was mechanically verified, at
   boot-glue scope; the app-driven variant is `NOT_TESTED`;
